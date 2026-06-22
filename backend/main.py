@@ -2,9 +2,9 @@ import gc
 import io
 import os
 import logging
+import subprocess
+import tempfile
 
-import numpy as np
-import potrace
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,6 +54,8 @@ async def convert(file: UploadFile = File(...)):
     if raw[:8] != PNG_SIGNATURE:
         raise HTTPException(status_code=415, detail="Only PNG files are accepted.")
 
+    bmp_path = None
+    svg_path = None
     try:
         img = Image.open(io.BytesIO(raw))
         width, height = img.size
@@ -64,60 +66,44 @@ async def convert(file: UploadFile = File(...)):
         del img
         gc.collect()
 
-        arr = np.array(gray, dtype=np.uint8)
+        # Write grayscale BMP to a temp file — potrace requires file input
+        with tempfile.NamedTemporaryFile(suffix=".bmp", delete=False) as f:
+            bmp_path = f.name
+            gray.save(f, format="BMP")
         del gray
         gc.collect()
 
-        # dark pixels → foreground (what potrace traces)
-        bitmap = arr < 128
-        del arr
-        gc.collect()
+        svg_path = bmp_path.replace(".bmp", ".svg")
 
-        bm = potrace.Bitmap(bitmap)
-        path_obj = bm.trace()
-        del bm, bitmap
-        gc.collect()
+        result = subprocess.run(
+            ["potrace", "--svg", "-o", svg_path, bmp_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
-        svg = _build_svg(path_obj, width, height)
-        del path_obj
-        gc.collect()
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "potrace exited with an error.")
+
+        with open(svg_path, "r", encoding="utf-8") as f:
+            svg = f.read()
 
         logger.info("converted %dx%d png → %d bytes svg", width, height, len(svg))
         return {"svg": svg}
 
     except HTTPException:
         raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Conversion timed out.")
     except Exception:
         gc.collect()
         logger.exception("conversion failed")
         raise HTTPException(status_code=500, detail="Conversion failed. The image may be malformed.")
-
-
-def _build_svg(path, width: int, height: int) -> str:
-    parts = []
-    for curve in path.curves:
-        s = curve.start_point
-        parts.append(f"M {s[0]:.3f} {s[1]:.3f}")
-        for seg in curve.segments:
-            e = seg.end_point
-            if seg.is_corner:
-                c = seg.c
-                parts.append(f"L {c[0]:.3f} {c[1]:.3f} L {e[0]:.3f} {e[1]:.3f}")
-            else:
-                c1, c2 = seg.c1, seg.c2
-                parts.append(
-                    f"C {c1[0]:.3f} {c1[1]:.3f} {c2[0]:.3f} {c2[1]:.3f} {e[0]:.3f} {e[1]:.3f}"
-                )
-        parts.append("Z")
-
-    d = " ".join(parts)
-    # potrace uses bottom-left origin; SVG uses top-left — flip vertically
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'viewBox="0 0 {width} {height}" '
-        f'width="{width}" height="{height}">'
-        f'<g transform="translate(0,{height}) scale(1,-1)">'
-        f'<path d="{d}" fill="#1A1A18" fill-rule="evenodd"/>'
-        f'</g>'
-        f'</svg>'
-    )
+    finally:
+        for path in (bmp_path, svg_path):
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+        gc.collect()
