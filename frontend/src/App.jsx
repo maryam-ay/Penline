@@ -35,6 +35,7 @@ export default function App() {
     setErrorMessage('')
 
     const originalSize = file.size
+    const fileName = file.name
     const formData = new FormData()
     formData.append('file', file)
 
@@ -62,6 +63,7 @@ export default function App() {
 
       setSvgContent(data.svg)
       setFileStats({
+        fileName,
         original: formatBytes(originalSize),
         svg: formatBytes(svgSize),
         delta: delta > 0 ? `−${delta}%` : `+${Math.abs(delta)}%`,
@@ -81,6 +83,7 @@ export default function App() {
   const handleChange = (e) => {
     const file = e.target.files[0]
     if (file) processFile(file)
+    e.target.value = ''
   }
 
   const handleDrop = (e) => {
@@ -116,21 +119,22 @@ export default function App() {
     setSvgContent('')
     setErrorMessage('')
     setFileStats(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const showUploadZone = state === 'idle' || state === 'error'
+  const showUploadZone = state !== 'processing'
 
   return (
     <div className="page">
-      <div className="container">
-        <header className="header">
-          <h1 className="wordmark">Penline.</h1>
-          <p className="tagline">Pixel to path.</p>
-        </header>
+      <div className="layout">
 
-        <main>
-          {showUploadZone && (
+        {/* ── LEFT COLUMN ───────────────────────────── */}
+        <div className="col-left">
+          <header className="header">
+            <h1 className="wordmark">Penline.</h1>
+            <p className="tagline">Pixel to path.</p>
+          </header>
+
+          {showUploadZone ? (
             <div
               className={`upload-zone${isDragging ? ' dragging' : ''}`}
               onDrop={handleDrop}
@@ -159,13 +163,7 @@ export default function App() {
                 aria-hidden="true"
               />
             </div>
-          )}
-
-          {state === 'error' && (
-            <p className="error-message" role="alert">{errorMessage}</p>
-          )}
-
-          {state === 'processing' && (
+          ) : (
             <div className="processing-wrap" role="status" aria-label="Converting">
               <div className="progress-track" aria-hidden="true">
                 <div className="progress-line" />
@@ -174,17 +172,61 @@ export default function App() {
             </div>
           )}
 
-          {state === 'success' && (
-            <div className="result">
+          {state === 'error' && (
+            <p className="error-message" role="alert">{errorMessage}</p>
+          )}
+
+          <div className="badges" aria-label="Supported formats">
+            <span className="badge">PNG</span>
+            <span className="badge">Max 2 MB</span>
+            <span className="badge">Free</span>
+          </div>
+        </div>
+
+        {/* ── DIVIDER ───────────────────────────────── */}
+        <div className="col-divider" aria-hidden="true" />
+
+        {/* ── RIGHT COLUMN ──────────────────────────── */}
+        <div className={`col-right${state === 'processing' ? ' dim' : ''}`}>
+          <div className="stat-cards" aria-label="File statistics">
+            <div className="stat-card">
+              <span className="stat-label">Source</span>
+              {fileStats ? (
+                <>
+                  <span className="stat-filename">{fileStats.fileName}</span>
+                  <span className="stat-size">{fileStats.original}</span>
+                </>
+              ) : (
+                <span className="stat-empty">—</span>
+              )}
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Output</span>
+              {fileStats ? (
+                <>
+                  <span className="stat-size output-size">{fileStats.svg}</span>
+                  <span className="stat-reduction">{fileStats.delta}</span>
+                </>
+              ) : (
+                <span className="stat-empty">—</span>
+              )}
+            </div>
+          </div>
+
+          <div className="preview-card">
+            {svgContent ? (
               <div
-                className="svg-preview"
+                className="svg-render"
                 dangerouslySetInnerHTML={{ __html: svgContent }}
                 aria-label="SVG preview"
               />
-              <div className="file-stats">
-                <span className="stat">PNG  →  {fileStats.original}</span>
-                <span className="stat">SVG  →  {fileStats.svg}  ({fileStats.delta})</span>
-              </div>
+            ) : (
+              <span className="preview-placeholder">Output will appear here</span>
+            )}
+          </div>
+
+          {state === 'success' && (
+            <div className="output-actions">
               <button className="download-btn" onClick={handleDownload}>
                 Download SVG
               </button>
@@ -193,7 +235,8 @@ export default function App() {
               </button>
             </div>
           )}
-        </main>
+        </div>
+
       </div>
     </div>
   )
