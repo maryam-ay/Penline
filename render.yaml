@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: penline-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_URL
+        sync: false   # set this to your Netlify URL after first deploy
